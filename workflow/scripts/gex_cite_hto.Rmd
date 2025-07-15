@@ -1,170 +1,234 @@
 ---
 title: "10X Genomics multimodal preprocessing"
-output: html_notebook
+author: "Erica Pehrsson"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
 ---
+
+Preprocess Illumina 10X Genomics GEX / CITE-seq / HTO data by sample
+
++ Cell Hashing: tagged antibodies against ubiquitous cell surface proteins to multiplex samples
++ CITE-seq: cell-surface protein measurements
 
 Code adapted from:
 
 + https://satijalab.org/seurat/articles/hashing_vignette
-+ https://satijalab.org/seurat/articles/multimodal_vignette#additional-functionality-for-multimodal-data-in-seurat
++ https://satijalab.org/seurat/articles/multimodal_vignette
++ Meijie/Shaoli code (CCRGB-42)
++ https://github.com/niaid/dsb
 
 ```{r setup, message=FALSE}
+#knitr::opts_knit$set(root.dir =  "/data/khanlab3/gb_omics/projects/khan/ccrgb_6/analysis/")
+#knitr::opts_chunk$set(echo = TRUE, dev="png",fig.path="masih/",fig.height=5,fig.width=7)
+
 library(Seurat)
 library(dplyr)
 library(ggplot2)
 library(patchwork)
+library(dsb)
 ```
-
-Cell Hashing: tagged antibodies against ubiquitous cell surface proteins to multiplex samples
-CITE-seq: cell-surface protein measurements
 
 # Create Seurat object
 
-## Read h5 file name from command line argument (for Rscript execution)
+## Read h5 file location from command line
+
 ```{r}
 args <- commandArgs(trailingOnly = TRUE)
+
 if (length(args) > 0) {
-  h5_file <- args[1]
+  sample <- args[1]
+  location <- args[2]
+
+  h5_file <- paste(location,sample,sep="/")
 } else {
-  h5_file <- "path/to/your_raw_feature_bc_matrix.h5" # fallback for interactive use
+  sample <- "SCAF3357_tEGFR_Pooled"
+  h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_42/raw/SCAF3357_tEGFR_Pooled_raw_feature_bc_matrix.h5" # fallback for interactive use
 }
 print(paste("Using input file:", h5_file))
 ```
 
-## Load data from h5 file
+## Load h5 data
+
+Assumes data includes only shared barcodes
+
 ```{r}
 sample.data <- Read10X_h5(h5_file)
 
-// Assumes these have already been filtered to shared barcodes
+# Simplify feature names
+rownames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "_*TotalSeqC", replacement = "",rownames(sample.data[["Antibody Capture"]]))
 
-rownames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "_[control_]*TotalSeqB", replacement = "",
-    rownames(sample.data[["Antibody Capture"]]))
-    
-# Split into RNA and ADT matrices
-rna_counts <- sample.data[["Gene Expression"]]
-adt_counts <- sample.data[["Antibody Capture"]]
+# Simplify barcode names (remove -1)
+colnames(sample.data[["Gene Expression"]]) <- gsub(pattern = "-1", replacement = "",colnames(sample.data[["Gene Expression"]]))
+colnames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "-1", replacement = "",colnames(sample.data[["Antibody Capture"]]))
 ```
 
-## Create Seurat object with RNA and normalize
+## Create Seurat object 
+
+Initialize with RNA, add ADT and HTO assays 
+
 ```{r}
-seurat_obj <- CreateSeuratObject(counts = rna_counts) # Can filter: min.cells = 3, min.features = 200
+seurat_obj <- CreateSeuratObject(counts = sample.data[["Gene Expression"]],project=sample)
+seurat_obj[["ADT"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][1:20,])
+seurat_obj[["HTO"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][21:23,])
+```
+
+To make object more manageable, remove cells with few RNA reads (will likely be removed during HTO demultiplexing anyway). This also fixes the error during HTODemux.
+
+```{r}
+seurat_obj <- subset(seurat_obj,nCount_RNA > 100)
+```
+
+# Normalize data 
+
+Log normalization for RNA, CLR transformation for antibodies
+
++ HTO: margin=1 for normalization across feature
++ CITE-seq: margin=2 for normalization within the cell, accounts for differences in ADT depth across cells (https://github.com/satijalab/seurat/issues/8159)
+* Overwritten by DSB normalization after HTO demultiplexing
+
+Should be updated to provide list of antibodies/hashing tags
+
+```{r}
 seurat_obj <- NormalizeData(seurat_obj)
-```
-
-## Add CITE-seq data and normalize (CLR transformation)
-```{r}
-seurat_obj[["ADT"]] <- CreateAssayObject(adt_counts[, colnames(seurat_obj)])
 seurat_obj <- NormalizeData(seurat_obj, assay = "ADT", normalization.method = "CLR", margin = 2)
-```
-
-## Add HTO data and normalize 
-```{r}
-seurat_obj[["HTO"]] <- CreateAssayObject(counts = hto_counts)
 seurat_obj <- NormalizeData(seurat_obj, assay = "HTO", normalization.method = "CLR")
 ```
 
 # Demultiplex samples by HTO
-Performs clustering on normalized values to separate cells into K(number of samples)+1 clusters. 
-For each HTO, classify each cell as positive/negative (doublets positive for more than one).
 
-```{r}
-seurat_obj <- HTODemux(seurat_obj, assay = "HTO", positive.quantile = 0.99)
+Performs clustering on normalized values to separate cells into K(number of samples)+1 clusters. For each HTO, classify each cell as positive or negative/ambiguous, with cross-sample doublets positive for more than one.
+
+```{r, eval=FALSE}
+seurat_obj <- HTODemux(seurat_obj, assay = "HTO", positive.quantile = 0.9999)
 ```
 
-## Identify cross-sample doublets and negative/ambiguous cells
-```{r}
-# Global classification results
-table(seurat_obj$HTO_classification.global)
+Alternatively, MULTIseqDemux (workaround for error due to 0 counts - based on Seurat issues, common). Uses default parameters.
 
-# Number of UMIs for each
-Idents(seurat_obj) <- "HTO_classification.global"
-VlnPlot(seurat_obj, features = "nCount_RNA", pt.size = 0.1, log = TRUE)
+```{r}
+seurat_obj <- MULTIseqDemux(seurat_obj, assay = "HTO")
 ```
 
 ## Visualize demultiplexing results
 
 ```{r}
-# Group cells based on the max HTO signal
-Idents(seurat_obj) <- "HTO_maxID"
+# Classification summary
+table(seurat_obj$MULTI_ID)
+
+# Number of UMIs by classification
+Idents(seurat_obj) <- "MULTI_ID"
+VlnPlot(seurat_obj, features = "nCount_RNA", log = TRUE)
 
 # Ridge plot for HTO signals
-RidgePlot(seurat_obj, assay = "HTO", features = rownames(seurat_obj[["HTO"]]), ncol = 2)
+RidgePlot(seurat_obj, assay = "HTO", features = rownames(seurat_obj[["HTO"]]),ncol=2)
 
-# Visualize pairs to confirm mutual exlusivity
-FeatureScatter(seurat_obj, feature1 = "hto_HTO-A", feature2 = "hto_HTO-B")
+# Visualize pairs to confirm mutual exclusivity
+FeatureScatter(seurat_obj, feature1 = "HashTag2", feature2 = "HashTag3")
+FeatureScatter(seurat_obj, feature1 = "HashTag2", feature2 = "HashTag4")
+FeatureScatter(seurat_obj, feature1 = "HashTag3", feature2 = "HashTag4")
 
-# UMAP colored by HTO classification
-seurat_obj <- RunPCA(seurat_obj, features = VariableFeatures(seurat_obj))
-seurat_obj <- RunUMAP(seurat_obj, dims = 1:10)
-DimPlot(seurat_obj, group.by = "HTO_classification.global")
-
-# tSNE
 # Remove negative cells from the object
 seurat_obj.subset <- subset(seurat_obj, idents = "Negative", invert = TRUE)
 
-# Calculate a tSNE embedding of the HTO data
+# Plot PCA on HTO data
 DefaultAssay(seurat_obj.subset) <- "HTO"
-seurat_obj.subset <- ScaleData(seurat_obj.subset, features = rownames(seurat_obj.subset),
-    verbose = FALSE)
+seurat_obj.subset <- ScaleData(seurat_obj.subset, features = rownames(seurat_obj.subset),verbose = FALSE)
 seurat_obj.subset <- RunPCA(seurat_obj.subset, features = rownames(seurat_obj.subset), approx = FALSE)
-seurat_obj.subset <- RunTSNE(seurat_obj.subset, dims = 1:8, perplexity = 100)
-
-# By singlet/doublet
-DimPlot(seurat_obj.subset)
-
-# By classification
-Idents(object) <- 'HTO_classification'
 DimPlot(seurat_obj.subset)
 ```
 
-## Extract singlets
+## Extract singlets and negatives
 
 ```{r}
-seurat_obj.singlet <- subset(seurat_obj, idents = "Singlet")
+seurat_obj.singlet <- subset(seurat_obj.subset, idents = "Doublet", invert = TRUE)
+seurat_obj.negative <- subset(seurat_obj, idents = "Negative")
+rm(seurat_obj.subset)
+```
+
+# ADT normalization with DSB
+
+Removes ambient noise using empty droplets and uses non-specific isotype controls to remove inter-cell technical variation
+
+```{r}
+isotypes = c("mIgG1","mIgG2a","mIgG2b","ahIgG")
+
+seurat_obj.singlet[["ADT"]]$data = DSBNormalizeProtein(cell_protein_matrix = seurat_obj.singlet[["ADT"]]$counts, 
+                                     empty_drop_matrix = seurat_obj.negative[["ADT"]]$counts, 
+                                     use.isotype.control = TRUE, isotype.control.name.vec = isotypes)
+```
+
+# GEX QC and filtering
+
+Adjust hardcoded filters
+
+```{r}
+seurat_obj.singlet[["percent.mt"]] <- PercentageFeatureSet(seurat_obj.singlet, assay = "RNA", pattern = "^MT-")
+
+VlnPlot(seurat_obj.singlet, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"))
+hist(seurat_obj.singlet$nFeature_RNA)
+hist(seurat_obj.singlet$percent.mt)
+
+seurat_obj.singlet.filtered <- subset(seurat_obj.singlet, subset = nFeature_RNA > 400 & nFeature_RNA < 8000 & percent.mt < 20)
+table(seurat_obj.singlet.filtered$MULTI_ID)
+VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+# Save object
+
+```{r}
+saveRDS(seurat_obj.singlet, file = "sample.singlet.rds")
+saveRDS(seurat_obj.singlet.filtered, file = "sample.singlet.filtered.rds")
 ```
 
 # GEX clustering
 
-```{r}
-# perform visualization and clustering steps
-seurat_obj <- NormalizeData(seurat_obj)
-seurat_obj <- FindVariableFeatures(seurat_obj)
-seurat_obj <- ScaleData(seurat_obj)
-seurat_obj <- RunPCA(seurat_obj, verbose = FALSE)
-seurat_obj <- FindNeighbors(seurat_obj, dims = 1:30)
-seurat_obj <- FindClusters(seurat_obj, resolution = 0.8, verbose = FALSE)
-seurat_obj <- RunUMAP(seurat_obj, dims = 1:30)
-DimPlot(seurat_obj, label = TRUE)
-```
+Adjust feature selection method, dims, resolution
 
 ```{r}
-# Normalize RNA data with log normalization
-seurat_obj <- NormalizeData(seurat_obj)
+DefaultAssay(seurat_obj.singlet.filtered) <- "RNA"
 
 # Select the top 1000 most variable features
-seurat_obj.singlet <- FindVariableFeatures(seurat_obj.singlet, selection.method = "mean.var.plot")
+seurat_obj.singlet.filtered <- FindVariableFeatures(seurat_obj.singlet.filtered, selection.method = "mean.var.plot")
 
-# Scaling RNA data, we only scale the variable features here for efficiency
-seurat_obj.singlet <- ScaleData(seurat_obj.singlet, features = VariableFeatures(seurat_obj.singlet))
+# Scaling RNA data
+seurat_obj.singlet.filtered <- ScaleData(seurat_obj.singlet.filtered)
 
 # Run PCA
-seurat_obj.singlet <- RunPCA(seurat_obj.singlet, features = VariableFeatures(seurat_obj.singlet))
+seurat_obj.singlet.filtered <- RunPCA(seurat_obj.singlet.filtered)
 
-# We select the top 10 PCs for clustering and tSNE based on PCElbowPlot
-seurat_obj.singlet <- FindNeighbors(seurat_obj.singlet, reduction = "pca", dims = 1:10)
-seurat_obj.singlet <- FindClusters(seurat_obj.singlet, resolution = 0.6, verbose = FALSE)
-seurat_obj.singlet <- RunTSNE(seurat_obj.singlet, reduction = "pca", dims = 1:10)
+# Cluster - select top 10 PCs
+seurat_obj.singlet.filtered <- FindNeighbors(seurat_obj.singlet.filtered, dims = 1:30)
+seurat_obj.singlet.filtered <- FindClusters(seurat_obj.singlet.filtered, resolution = 0.8)
+seurat_obj.singlet.filtered <- RunUMAP(seurat_obj.singlet.filtered, dims = 1:30)
 
-# Projecting singlet identities on TSNE visualization
-DimPlot(seurat_obj.singlet, group.by = "HTO_classification")
-```
-
-```{r}
-plot1 <- FeatureScatter(seurat_obj, feature1 = "adt_CD19", feature2 = "adt_CD3", pt.size = 1)
-plot2 <- FeatureScatter(seurat_obj, feature1 = "adt_CD4", feature2 = "adt_CD8a", pt.size = 1)
-plot3 <- FeatureScatter(seurat_obj, feature1 = "adt_CD3", feature2 = "CD3E", pt.size = 1)
-(plot1 + plot2 + plot3) & NoLegend()
+# Project singlet identities onto UMAP
+DimPlot(seurat_obj.singlet.filtered)
+DimPlot(seurat_obj.singlet.filtered, group.by = "MULTI_ID")
 ```
 
 # Visualize features of interest
-## Find markers for all clusters using RNA and ADT
+
+Project CD8 / CD4 protein on RNA-based clusters
+
+```{r}
+p1 <- FeaturePlot(seurat_obj.singlet.filtered, "adt_CD8") + ggtitle("CD8 protein")
+p2 <- FeaturePlot(seurat_obj.singlet.filtered, "adt_CD4") + ggtitle("CD4 protein")
+p1 | p2
+
+VlnPlot(seurat_obj.singlet.filtered, "adt_CD8")
+VlnPlot(seurat_obj.singlet.filtered, "adt_CD4")
+
+FeatureScatter(seurat_obj.singlet.filtered, "adt_CD4", "adt_CD8")
+```
+
+## Find markers for all clusters using ADT
+
+```{r}
+adt_markers <- FindAllMarkers(seurat_obj.singlet.filtered, assay = "ADT")
+head(adt_markers)
+```
