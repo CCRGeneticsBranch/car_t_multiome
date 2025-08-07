@@ -11,10 +11,10 @@ editor_options:
   chunk_output_type: console
 ---
 
-Preprocess Illumina 10X Genomics GEX / CITE-seq / HTO data by sample
+Preprocess Illumina 10X Genomics GEX / CITE-seq / HTO data by sample - from Cell Ranger raw matrix
 
-+ Cell Hashing: tagged antibodies against ubiquitous cell surface proteins to multiplex samples
 + CITE-seq: cell-surface protein measurements
++ Cell Hashing: tagged antibodies against ubiquitous cell surface proteins to multiplex samples
 
 Code adapted from:
 
@@ -47,8 +47,11 @@ if (length(args) > 0) {
 
   h5_file <- paste(location,sample,sep="/")
 } else {
-  sample <- "SCAF3357_tEGFR_Pooled"
-  h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_42/raw/SCAF3357_tEGFR_Pooled_raw_feature_bc_matrix.h5" # fallback for interactive use
+  sample <- "GPC2_CD276_BisCAR_CTRL"
+  h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger/GPC2_CD276_BisCAR_CTRL/outs/multi/count/raw_feature_bc_matrix.h5"
+
+  #sample <- "SCAF3357_tEGFR_Pooled"
+  #h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_42/raw/SCAF3357_tEGFR_Pooled_raw_feature_bc_matrix.h5" # fallback for interactive use
 }
 print(paste("Using input file:", h5_file))
 ```
@@ -74,8 +77,8 @@ Initialize with RNA, add ADT and HTO assays
 
 ```{r}
 seurat_obj <- CreateSeuratObject(counts = sample.data[["Gene Expression"]],project=sample)
-seurat_obj[["ADT"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][1:20,])
-seurat_obj[["HTO"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][21:23,])
+seurat_obj[["ADT"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][5:22,])
+seurat_obj[["HTO"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][1:4,])
 ```
 
 To make object more manageable, remove cells with few RNA reads (will likely be removed during HTO demultiplexing anyway). This also fixes the error during HTODemux.
@@ -183,52 +186,4 @@ VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", 
 ```{r}
 saveRDS(seurat_obj.singlet, file = "sample.singlet.rds")
 saveRDS(seurat_obj.singlet.filtered, file = "sample.singlet.filtered.rds")
-```
-
-# GEX clustering
-
-Adjust feature selection method, dims, resolution
-
-```{r}
-DefaultAssay(seurat_obj.singlet.filtered) <- "RNA"
-
-# Select the top 1000 most variable features
-seurat_obj.singlet.filtered <- FindVariableFeatures(seurat_obj.singlet.filtered, selection.method = "mean.var.plot")
-
-# Scaling RNA data
-seurat_obj.singlet.filtered <- ScaleData(seurat_obj.singlet.filtered)
-
-# Run PCA
-seurat_obj.singlet.filtered <- RunPCA(seurat_obj.singlet.filtered)
-
-# Cluster - select top 10 PCs
-seurat_obj.singlet.filtered <- FindNeighbors(seurat_obj.singlet.filtered, dims = 1:30)
-seurat_obj.singlet.filtered <- FindClusters(seurat_obj.singlet.filtered, resolution = 0.8)
-seurat_obj.singlet.filtered <- RunUMAP(seurat_obj.singlet.filtered, dims = 1:30)
-
-# Project singlet identities onto UMAP
-DimPlot(seurat_obj.singlet.filtered)
-DimPlot(seurat_obj.singlet.filtered, group.by = "MULTI_ID")
-```
-
-# Visualize features of interest
-
-Project CD8 / CD4 protein on RNA-based clusters
-
-```{r}
-p1 <- FeaturePlot(seurat_obj.singlet.filtered, "adt_CD8") + ggtitle("CD8 protein")
-p2 <- FeaturePlot(seurat_obj.singlet.filtered, "adt_CD4") + ggtitle("CD4 protein")
-p1 | p2
-
-VlnPlot(seurat_obj.singlet.filtered, "adt_CD8")
-VlnPlot(seurat_obj.singlet.filtered, "adt_CD4")
-
-FeatureScatter(seurat_obj.singlet.filtered, "adt_CD4", "adt_CD8")
-```
-
-## Find markers for all clusters using ADT
-
-```{r}
-adt_markers <- FindAllMarkers(seurat_obj.singlet.filtered, assay = "ADT")
-head(adt_markers)
 ```
