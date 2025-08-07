@@ -1,0 +1,122 @@
+---
+title: "10X Genomics multimodal preprocessing - filtered"
+author: "Erica Pehrsson"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+---
+
+Preprocess Illumina 10X Genomics GEX / CITE-seq / HTO data by sample - from Cell Ranger demultiplexed/filtered matrix
+
++ CITE-seq: cell-surface protein measurements
++ Cell Hashing: tagged antibodies against ubiquitous cell surface proteins to multiplex samples
+
+Code adapted from:
+
++ https://satijalab.org/seurat/articles/hashing_vignette
++ https://satijalab.org/seurat/articles/multimodal_vignette
++ Meijie/Shaoli code (CCRGB-42)
++ https://github.com/niaid/dsb
+
+```{r setup, message=FALSE}
+#knitr::opts_knit$set(root.dir =  "/data/khanlab3/gb_omics/projects/khan/ccrgb_6/analysis/")
+#knitr::opts_chunk$set(echo = TRUE, dev="png",fig.path="masih/",fig.height=5,fig.width=7)
+
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(dsb)
+```
+
+# Create Seurat object
+
+## Read h5 file location from command line
+
+```{r}
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) > 0) {
+  sample <- args[1]
+  location <- args[2]
+
+  h5_file <- paste(location,sample,sep="/")
+} else {
+  sample <- "GPC2_CD276_BisCAR_CTRL_TIL_rep1"
+  h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger/GPC2_CD276_BisCAR_CTRL/outs/per_sample_outs/CTRL_TIL_rep1/count/sample_filtered_feature_bc_matrix.h5"
+}
+print(paste("Using input file:", h5_file))
+```
+
+## Load h5 data
+
+Assumes data includes only shared barcodes
+
+```{r}
+sample.data <- Read10X_h5(h5_file)
+
+# Simplify feature names
+rownames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "_*TotalSeqC", replacement = "",rownames(sample.data[["Antibody Capture"]]))
+```
+
+## Create Seurat object 
+
+Initialize with RNA, add ADT assay 
+
+```{r}
+seurat_obj <- CreateSeuratObject(counts = sample.data[["Gene Expression"]],project=sample)
+seurat_obj[["ADT"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]])
+```
+
+# Normalize data 
+
+Log normalization for RNA, CLR transformation for antibodies
+
++ HTO: margin=1 for normalization across feature
++ CITE-seq: margin=2 for normalization within the cell, accounts for differences in ADT depth across cells (https://github.com/satijalab/seurat/issues/8159)
+* Overwritten by DSB normalization
+
+```{r}
+seurat_obj <- NormalizeData(seurat_obj)
+seurat_obj <- NormalizeData(seurat_obj, assay = "ADT", normalization.method = "CLR", margin = 2)
+```
+
+# ADT normalization with DSB
+
+Removes ambient noise WITHOUT empty droplets and uses non-specific isotype controls to remove inter-cell technical variation
+
+```{r}
+isotypes = c("Mm-IgG1-Kappa-isotype-Ctrl","Mm-IgG2a-Kappa-isotype-Ctrl","Mm-IgG2b-Kappa-isotype-Ctrl")
+
+seurat_obj[["ADT"]]$data = ModelNegativeADTnorm(cell_protein_matrix = seurat_obj[["ADT"]]$counts, 
+                                     denoise.counts = TRUE,
+                                     use.isotype.control = TRUE, 
+                                     isotype.control.name.vec = isotypes)
+```
+
+# GEX QC and filtering
+
+Adjust hardcoded filters
+
+```{r}
+seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, assay = "RNA", pattern = "^MT-")
+
+VlnPlot(seurat_obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"))
+hist(seurat_obj$nFeature_RNA)
+hist(seurat_obj$percent.mt)
+
+seurat_obj.filtered <- subset(seurat_obj, subset = nFeature_RNA > 400 & nFeature_RNA < 8000 & percent.mt < 20)
+VlnPlot(seurat_obj.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+# Save object
+
+```{r}
+saveRDS(seurat_obj, file = "sample.singlet.rds")
+saveRDS(seurat_obj.filtered, file = "sample.singlet.filtered.rds")
+```
