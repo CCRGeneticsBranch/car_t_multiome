@@ -1,5 +1,5 @@
 ---
-title: "10X Genomics multimodal preprocessing"
+title: "10X Genomics CITEseq preprocessing: `r params$library`"
 author: "Erica Pehrsson"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 output:
@@ -9,9 +9,16 @@ output:
     code_folding: hide
 editor_options:
   chunk_output_type: console
+params:
+  library: "GPC2_CD276_BisCAR_CTRL"
+  location: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger"
+  hashtags: "HTO1,HTO2,HTO3,HTO4"
+  nFeature_RNA_min: 500
+  nFeature_RNA_max: 6000
+  percent.mt_max: 10
 ---
 
-Preprocess Illumina 10X Genomics GEX / CITE-seq / HTO data by sample - from Cell Ranger raw matrix
+Preprocess Illumina 10X Genomics GEX / antibody capture / HTO data by library - from Cell Ranger raw matrix
 
 + CITE-seq: cell-surface protein measurements
 + Cell Hashing: tagged antibodies against ubiquitous cell surface proteins to multiplex samples
@@ -36,23 +43,15 @@ library(dsb)
 
 # Create Seurat object
 
-## Read h5 file location from command line
+## Get h5 file location
 
 ```{r}
-args <- commandArgs(trailingOnly = TRUE)
+library <- params$library
+location <- params$location
+hashtags <- strsplit(params$hashtags,",")[[1]]
 
-if (length(args) > 0) {
-  sample <- args[1]
-  location <- args[2]
+h5_file <- paste(location,library,"outs/multi/count/raw_feature_bc_matrix.h5",sep="/")
 
-  h5_file <- paste(location,sample,sep="/")
-} else {
-  sample <- "GPC2_CD276_BisCAR_CTRL"
-  h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger/GPC2_CD276_BisCAR_CTRL/outs/multi/count/raw_feature_bc_matrix.h5"
-
-  #sample <- "SCAF3357_tEGFR_Pooled"
-  #h5_file <- "/data/khanlab3/gb_omics/projects/khan/ccrgb_42/raw/SCAF3357_tEGFR_Pooled_raw_feature_bc_matrix.h5" # fallback for interactive use
-}
 print(paste("Using input file:", h5_file))
 ```
 
@@ -61,14 +60,14 @@ print(paste("Using input file:", h5_file))
 Assumes data includes only shared barcodes
 
 ```{r}
-sample.data <- Read10X_h5(h5_file)
+library.data <- Read10X_h5(h5_file)
 
 # Simplify feature names
-rownames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "_*TotalSeqC", replacement = "",rownames(sample.data[["Antibody Capture"]]))
+rownames(library.data[["Antibody Capture"]]) <- gsub(pattern = "_*TotalSeqC", replacement = "",rownames(library.data[["Antibody Capture"]]))
 
-# Simplify barcode names (remove -1)
-colnames(sample.data[["Gene Expression"]]) <- gsub(pattern = "-1", replacement = "",colnames(sample.data[["Gene Expression"]]))
-colnames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "-1", replacement = "",colnames(sample.data[["Antibody Capture"]]))
+# Simplify barcode names
+colnames(library.data[["Gene Expression"]]) <- gsub(pattern = "-1", replacement = "",colnames(library.data[["Gene Expression"]]))
+colnames(library.data[["Antibody Capture"]]) <- gsub(pattern = "-1", replacement = "",colnames(library.data[["Antibody Capture"]]))
 ```
 
 ## Create Seurat object 
@@ -76,12 +75,12 @@ colnames(sample.data[["Antibody Capture"]]) <- gsub(pattern = "-1", replacement 
 Initialize with RNA, add ADT and HTO assays 
 
 ```{r}
-seurat_obj <- CreateSeuratObject(counts = sample.data[["Gene Expression"]],project=sample)
-seurat_obj[["ADT"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][5:22,])
-seurat_obj[["HTO"]] <- CreateAssayObject(counts = sample.data[["Antibody Capture"]][1:4,])
+seurat_obj <- CreateSeuratObject(counts = library.data[["Gene Expression"]],project=library)
+seurat_obj[["ADT"]] <- CreateAssayObject(counts = library.data[["Antibody Capture"]][5:22,])
+seurat_obj[["HTO"]] <- CreateAssayObject(counts = library.data[["Antibody Capture"]][hashtags,])
 ```
 
-To make object more manageable, remove cells with few RNA reads (will likely be removed during HTO demultiplexing anyway). This also fixes the error during HTODemux.
+Remove cells with few RNA reads to fix the HTODemux error (will likely be removed during HTO demultiplexing anyway).
 
 ```{r}
 seurat_obj <- subset(seurat_obj,nCount_RNA > 100)
@@ -92,10 +91,8 @@ seurat_obj <- subset(seurat_obj,nCount_RNA > 100)
 Log normalization for RNA, CLR transformation for antibodies
 
 + HTO: margin=1 for normalization across feature
-+ CITE-seq: margin=2 for normalization within the cell, accounts for differences in ADT depth across cells (https://github.com/satijalab/seurat/issues/8159)
++ CITE-seq: margin=2 for normalization within the cell, accounting for differences in ADT depth across cells (https://github.com/satijalab/seurat/issues/8159)
 * Overwritten by DSB normalization after HTO demultiplexing
-
-Should be updated to provide list of antibodies/hashing tags
 
 ```{r}
 seurat_obj <- NormalizeData(seurat_obj)
@@ -105,13 +102,15 @@ seurat_obj <- NormalizeData(seurat_obj, assay = "HTO", normalization.method = "C
 
 # Demultiplex samples by HTO
 
-Performs clustering on normalized values to separate cells into K(number of samples)+1 clusters. For each HTO, classify each cell as positive or negative/ambiguous, with cross-sample doublets positive for more than one.
+HTODemux performs clustering on normalized values to separate cells into K(number of samples)+1 clusters. For each HTO, classifies each cell as positive or negative/ambiguous, with cross-sample doublets positive for more than one.
+
+Commonly gives an error due to 0 counts (based on Seurat issues, common).
 
 ```{r, eval=FALSE}
 seurat_obj <- HTODemux(seurat_obj, assay = "HTO", positive.quantile = 0.9999)
 ```
 
-Alternatively, MULTIseqDemux (workaround for error due to 0 counts - based on Seurat issues, common). Uses default parameters.
+Alternatively, use MULTIseqDemux as workaround (default parameters).
 
 ```{r}
 seurat_obj <- MULTIseqDemux(seurat_obj, assay = "HTO")
@@ -131,9 +130,12 @@ VlnPlot(seurat_obj, features = "nCount_RNA", log = TRUE)
 RidgePlot(seurat_obj, assay = "HTO", features = rownames(seurat_obj[["HTO"]]),ncol=2)
 
 # Visualize pairs to confirm mutual exclusivity
-FeatureScatter(seurat_obj, feature1 = "HashTag2", feature2 = "HashTag3")
-FeatureScatter(seurat_obj, feature1 = "HashTag2", feature2 = "HashTag4")
-FeatureScatter(seurat_obj, feature1 = "HashTag3", feature2 = "HashTag4")
+DefaultAssay(seurat_obj) <- "HTO"
+for (i in 1:(length(hashtags) - 1)) {
+  for (j in (i + 1):length(hashtags)) {
+    print(FeatureScatter(seurat_obj, feature1 = hashtags[i], feature2 = hashtags[j]))
+  }
+}
 
 # Remove negative cells from the object
 seurat_obj.subset <- subset(seurat_obj, idents = "Negative", invert = TRUE)
@@ -155,10 +157,10 @@ rm(seurat_obj.subset)
 
 # ADT normalization with DSB
 
-Removes ambient noise using empty droplets and uses non-specific isotype controls to remove inter-cell technical variation
+Removes ambient noise using empty droplets and uses non-specific isotype controls to remove inter-cell technical variation.
 
 ```{r}
-isotypes = c("mIgG1","mIgG2a","mIgG2b","ahIgG")
+isotypes = c("Mm-IgG1-Kappa-isotype-Ctrl","Mm-IgG2a-Kappa-isotype-Ctrl","Mm-IgG2b-Kappa-isotype-Ctrl")
 
 seurat_obj.singlet[["ADT"]]$data = DSBNormalizeProtein(cell_protein_matrix = seurat_obj.singlet[["ADT"]]$counts, 
                                      empty_drop_matrix = seurat_obj.negative[["ADT"]]$counts, 
@@ -167,8 +169,6 @@ seurat_obj.singlet[["ADT"]]$data = DSBNormalizeProtein(cell_protein_matrix = seu
 
 # GEX QC and filtering
 
-Adjust hardcoded filters
-
 ```{r}
 seurat_obj.singlet[["percent.mt"]] <- PercentageFeatureSet(seurat_obj.singlet, assay = "RNA", pattern = "^MT-")
 
@@ -176,7 +176,9 @@ VlnPlot(seurat_obj.singlet, features = c("nFeature_RNA", "nCount_RNA", "percent.
 hist(seurat_obj.singlet$nFeature_RNA)
 hist(seurat_obj.singlet$percent.mt)
 
-seurat_obj.singlet.filtered <- subset(seurat_obj.singlet, subset = nFeature_RNA > 400 & nFeature_RNA < 8000 & percent.mt < 20)
+seurat_obj.singlet.filtered <- subset(seurat_obj.singlet, subset = nFeature_RNA > params$nFeature_RNA_min & 
+                                        nFeature_RNA < params$nFeature_RNA_max & 
+                                        percent.mt < params$percent.mt_max)
 table(seurat_obj.singlet.filtered$MULTI_ID)
 VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
 ```
@@ -184,6 +186,6 @@ VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", 
 # Save object
 
 ```{r}
-saveRDS(seurat_obj.singlet, file = "sample.singlet.rds")
-saveRDS(seurat_obj.singlet.filtered, file = "sample.singlet.filtered.rds")
+saveRDS(seurat_obj.singlet, file = paste(library,".singlet.rds",sep=""))
+saveRDS(seurat_obj.singlet.filtered, file = paste(library,".singlet.filtered.rds",sep=""))
 ```
