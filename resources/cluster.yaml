@@ -1,0 +1,22 @@
+# Cluster resources per rule
+__default__:
+    gres: lscratch:500
+    mem: 4g
+    threads: 2
+    time: 00-01:00:00
+    partition: norm
+    name: "{rule}.{wildcards}"
+    output: "logs/{rule}.${{SLURM_JOBID}}.%j.{wildcards}.out"
+    error: "logs/{rule}.${{SLURM_JOBID}}.%j.{wildcards}.err"
+
+mkref:
+    mem: 32g
+    threads: 12
+
+cellranger:
+    mem: 35g
+    threads: 12
+    time: 00-04:00:00
+
+preprocess_library:
+    mem: 16g

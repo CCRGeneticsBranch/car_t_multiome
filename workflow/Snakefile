@@ -1,0 +1,195 @@
+# Import python libraries
+import os
+from os.path import join
+import itertools
+import yaml
+import pandas as pd
+
+# Set directories
+WORKDIR = config["workdir"]
+RESULTSDIR = join(WORKDIR,"results")
+SCRIPTSDIR = config["scriptsdir"]
+
+# Get list of samples/libraries
+manifest = pd.read_table(config["manifest"])
+LIBRARIES =  manifest['Library'].unique()
+SAMPLES =  manifest['Sample'].unique()
+FCID = dict(zip(manifest['Library'], manifest['FCID']))
+HASHTAG = dict(zip(manifest['Sample'], manifest['HTO']))
+
+custom_genome = config['custom_genome']
+RAWDIR = config["rawdir"]
+
+# Define tools
+with open(config["tools"]) as f:
+    TOOLS = yaml.safe_load(f)
+
+# Define resources per rule
+with open(config["cluster"]) as f:
+    CLUSTER = yaml.safe_load(f)
+
+getthreads=lambda rname:int(CLUSTER[rname]["threads"]) if rname in CLUSTER and "threads" in CLUSTER[rname] else int(CLUSTER["__default__"]["threads"])
+getmemg=lambda rname:CLUSTER[rname]["mem"] if rname in CLUSTER and "mem" in CLUSTER[rname] else CLUSTER["__default__"]["mem"]
+
+# Rules
+
+localrules: link_fastq, copy_summary
+
+rule all:
+    input:
+        # Custom reference
+        join(RESULTSDIR, "custom_reference", custom_genome)
+
+        # Link fastq
+        expand(join((RESULTSDIR,"raw","{library}_5GEX_S1_L001_R1_001.fastq.gz"), library=LIBRARIES),
+
+        # cellranger raw matrices
+        expand(join(RESULTSDIR, "cellranger", "{library}", "outs", "multi", "count", "raw_feature_bc_matrix.h5"), library=LIBRARIES),
+
+        # cellranger web summaries
+        expand(join(RESULTSDIR, "cellranger", "{library}.{sample}.web_summary.html"), library=LIBRARIES, sample=SAMPLES)
+
+        # Library-level preprocessing
+        expand(join(RESULTSDIR, "preprocessing", "{library}.singlet.rds"), library=LIBRARIES),
+        expand(join(RESULTSDIR, "preprocessing", "{library}.singlet.filtered.rds"), library=LIBRARIES),
+
+        # Sample-level preprocessing
+        expand(join(RESULTSDIR, "preprocessing", "{sample}.rds"), sample=SAMPLES),
+        expand(join(RESULTSDIR, "preprocessing", "{sample}.filtered.rds"), sample=SAMPLES),
+
+rule link_fastq:
+    """Link and rename fastq files to bcl2fastq format"""
+    input:
+    output:
+        fastq = join(RESULTSDIR,"raw","{library}_5GEX_S1_L001_R1_001.fastq.gz")
+    params:
+        library = "{library}",
+        fcid = lambda wc: "%s" % FCID[wc.library]
+    shell:
+        """
+        for mode in ["5GEX", "BC", "TCR"]:
+            for read in ["R1","R2","I1","I2"]:
+                ln -s join(RAWDIR,"Sample_{params.library}_$mode\_Tsc_{params$fcid}/Sample_{params.library}_$mode\_Tsc_{params$fcid}_$read\.fastq.gz") \ 
+                join(RESULTSDIR,"raw","{params.library}_$mode\_S1_L001_$read\_001.fastq.gz")
+        """
+
+rule mkref:
+    """Run cellranger mkref to add construct to reference genome"""
+    input:
+        fasta = join(RESULTSDIR,"custom_reference","genome.fa"),
+        gtf = join(RESULTSDIR,"custom_reference","genes.gtf")   
+    output:
+        ref = join(RESULTSDIR,"custom_reference","{custom_genome}")
+    envmodules:
+        TOOLS["cellranger"]
+    shell:
+        """
+        TEMP="/lscratch/$SLURM_JOB_ID"
+
+        cellranger mkref --genome={output.ref} \
+            --fasta={input.fasta} \
+            --genes={input.gtf} \
+            --memgb=48 --nthreads=12 \
+            --localcores=$SLURM_CPUS_PER_TASK \
+            --localmem=92 \
+            --jobmode=slurm --maxjobs=20
+        """
+
+rule cellranger:
+    """Run Cell Ranger multi for each library"""
+    input:
+        multi_csv = join(RESULTSDIR,"cellranger","multi_{library}.csv")
+    output:
+        raw_matrix = join(RESULTSDIR,"cellranger","{library}","outs","multi","count","raw_feature_bc_matrix.h5")
+    params:
+        library = "{library}"
+    envmodules:
+        TOOLS["cellranger"]
+    shell:
+        """
+        TEMP="/lscratch/$SLURM_JOB_ID"
+
+        cellranger multi --id {params.library} \
+            --csv {input.multi_csv} \
+            --localcores=$SLURM_CPUS_PER_TASK \
+            --localmem=34 \
+            --jobmode=slurm --maxjobs=40
+        """
+
+rule copy_summary:
+    """Copy and rename Cell Ranger web summary"""
+    input:
+        summary = join(RESULTSDIR,"cellranger","{library}","outs","per_sample_outs","{sample}","web_summary.html")
+    output:
+        summary = join(RESULTSDIR,"cellranger","{library}.{sample}.web_summary.html")
+    shell:
+        """
+        cp {input.summary} {output.summary}
+        """
+
+rule preprocess_library:
+    """Run library-level demultiplexing, normalization, and QC filtering"""
+    input:
+        raw_matrix = join(RESULTSDIR,"cellranger","{library}","outs","multi","count","raw_feature_bc_matrix.h5")
+    output:
+        raw_obj = join(RESULTSDIR,"preprocessing","{library}.singlet.rds"),
+        filtered_obj = join(RESULTSDIR,"preprocessing","{library}.singlet.filtered.rds")
+    params:
+        script: join(SCRIPTSDIR,"preprocessing_library.Rmd"),
+        library: "{library}",
+        hashtags: "HTO1,HTO2,HTO3,HTO4",
+        nFeature_RNA_min: config["nFeature_RNA_min"],
+        nFeature_RNA_max: config["nFeature_RNA_max"],
+        percent_mt_max: config["percent_mt_max"],
+        indir: join(RESULTSDIR,"cellranger"),
+        outdirs: join(RESULTSDIR,"preprocessing")
+    envmodules:
+        TOOLS["R"]
+    shell:
+        """
+        Rscript -e 'rmarkdown::render("{params.script}",
+                             output_file = "{params.outdir}/{params.library}.html",
+                             params = list(
+                                library = "{params.library}",
+                                input_dir = "{params.indir}",
+                                output_dir = "{params.outdir}",
+                                hashtags = "{params.hashtags}",
+                                nFeature_RNA_min = {params.nFeature_RNA_min},
+                                nFeature_RNA_max = {params.nFeature_RNA_max},
+                                percent_mt_max = {params.percent_mt_max}
+                             ))'
+        """
+
+rule preprocess_sample:
+    """Run sample-level normalization and QC filtering"""
+    input:
+        raw_matrix = join(RESULTSDIR,"cellranger","{library}","outs","multi","count","raw_feature_bc_matrix.h5"),
+        filtered_matrix = join(RESULTSDIR,"cellranger","{library}","outs","per_sample_outs","{sample}","count","sample_filtered_feature_bc_matrix.h5")
+    output:
+        raw_obj = join(RESULTSDIR,"preprocessing","{sample}.rds"),
+        filtered_obj = join(RESULTSDIR,"preprocessing","{sample}.filtered.rds")
+    params:
+        script = join(SCRIPTSDIR,"preprocessing_sample.Rmd"),
+        library = "{library}",
+        sample = "{sample}",
+        nFeature_RNA_min = config["nFeature_RNA_min"],
+        nFeature_RNA_max = config["nFeature_RNA_max"],
+        percent_mt_max = config["percent_mt_max"],
+        indir = join(RESULTSDIR,"cellranger"),
+        outdir = join(RESULTSDIR,"preprocessing")
+    envmodules:
+        TOOLS["R"]
+    shell:
+    """
+        Rscript -e 'rmarkdown::render("{params.script}",
+                             output_file = "{params.outdir}/{params.library}.html",
+                             params = list(
+                                library = "{params.library}",
+                                sample = "{params.sample}",
+                                input_dir = "{params.indir}",
+                                output_dir = "{params.outdir}",
+                                nFeature_RNA_min = {params.nFeature_RNA_min},
+                                nFeature_RNA_max = {params.nFeature_RNA_max},
+                                percent_mt_max = {params.percent_mt_max}
+                             ))'
+    """

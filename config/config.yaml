@@ -1,0 +1,29 @@
+# References
+
+workdir:
+    WORKDIR
+scriptsdir:
+    PIPELINE_HOME/workflow/scripts/
+manifest:
+    WORKDIR/config/samples.tsv
+tools:
+    PIPELINE_HOME/resources/tools.yaml
+cluster:
+    PIPELINE_HOME/resources/cluster.yaml
+
+rawdir:
+    /data/khanlab/projects/DATA/
+
+run_cellranger: True
+
+# Custom references
+custom_genome: GRCh38_BiCisCar
+
+GRCh38_BiCisCar:
+GRCh38_FGFR4:
+GRCh38_BiCisCar_LTR:
+
+# QC thresholds
+nFeature_RNA_min: 500
+nFeature_RNA_max: 6000
+percent.mt_max: 10
