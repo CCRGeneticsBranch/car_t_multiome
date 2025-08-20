@@ -11,7 +11,8 @@ editor_options:
   chunk_output_type: console
 params:
   library: "GPC2_CD276_BisCAR_CTRL"
-  location: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger"
+  input_dir: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger"
+  output_dir: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/preprocessing"
   hashtags: "HTO1,HTO2,HTO3,HTO4"
   nFeature_RNA_min: 500
   nFeature_RNA_max: 6000
@@ -28,12 +29,9 @@ Code adapted from:
 + https://satijalab.org/seurat/articles/hashing_vignette
 + https://satijalab.org/seurat/articles/multimodal_vignette
 + Meijie/Shaoli code (CCRGB-42)
-+ https://github.com/niaid/dsb
++ https://cran.r-project.org/web/packages/dsb/vignettes/end_to_end_workflow.html
 
 ```{r setup, message=FALSE}
-#knitr::opts_knit$set(root.dir =  "/data/khanlab3/gb_omics/projects/khan/ccrgb_6/analysis/")
-#knitr::opts_chunk$set(echo = TRUE, dev="png",fig.path="masih/",fig.height=5,fig.width=7)
-
 library(Seurat)
 library(dplyr)
 library(ggplot2)
@@ -47,10 +45,11 @@ library(dsb)
 
 ```{r}
 library <- params$library
-location <- params$location
+input_dir <- params$input_dir
+output_dir <- params$output_dir
 hashtags <- strsplit(params$hashtags,",")[[1]]
 
-h5_file <- paste(location,library,"outs/multi/count/raw_feature_bc_matrix.h5",sep="/")
+h5_file <- paste(input_dir,library,"outs/multi/count/raw_feature_bc_matrix.h5",sep="/")
 
 print(paste("Using input file:", h5_file))
 ```
@@ -64,10 +63,6 @@ library.data <- Read10X_h5(h5_file)
 
 # Simplify feature names
 rownames(library.data[["Antibody Capture"]]) <- gsub(pattern = "_*TotalSeqC", replacement = "",rownames(library.data[["Antibody Capture"]]))
-
-# Simplify barcode names
-colnames(library.data[["Gene Expression"]]) <- gsub(pattern = "-1", replacement = "",colnames(library.data[["Gene Expression"]]))
-colnames(library.data[["Antibody Capture"]]) <- gsub(pattern = "-1", replacement = "",colnames(library.data[["Antibody Capture"]]))
 ```
 
 ## Create Seurat object 
@@ -164,7 +159,10 @@ isotypes = c("Mm-IgG1-Kappa-isotype-Ctrl","Mm-IgG2a-Kappa-isotype-Ctrl","Mm-IgG2
 
 seurat_obj.singlet[["ADT"]]$data = DSBNormalizeProtein(cell_protein_matrix = seurat_obj.singlet[["ADT"]]$counts, 
                                      empty_drop_matrix = seurat_obj.negative[["ADT"]]$counts, 
-                                     use.isotype.control = TRUE, isotype.control.name.vec = isotypes)
+                                     denoise.counts = TRUE,
+                                     use.isotype.control = TRUE, 
+                                     isotype.control.name.vec = isotypes,
+                                     fast.km = TRUE)
 ```
 
 # GEX QC and filtering
@@ -176,6 +174,8 @@ VlnPlot(seurat_obj.singlet, features = c("nFeature_RNA", "nCount_RNA", "percent.
 hist(seurat_obj.singlet$nFeature_RNA)
 hist(seurat_obj.singlet$percent.mt)
 
+print(paste("Number of genes:",params$nFeature_RNA_min,"-",params$nFeature_RNA_max))
+print(paste("% MT:",params$percent.mt_max))
 seurat_obj.singlet.filtered <- subset(seurat_obj.singlet, subset = nFeature_RNA > params$nFeature_RNA_min & 
                                         nFeature_RNA < params$nFeature_RNA_max & 
                                         percent.mt < params$percent.mt_max)
@@ -186,6 +186,6 @@ VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", 
 # Save object
 
 ```{r}
-saveRDS(seurat_obj.singlet, file = paste(library,".singlet.rds",sep=""))
-saveRDS(seurat_obj.singlet.filtered, file = paste(library,".singlet.filtered.rds",sep=""))
+saveRDS(seurat_obj.singlet, file = paste(output_dir,"/",library,".singlet.rds",sep=""))
+saveRDS(seurat_obj.singlet.filtered, file = paste(output_dir,"/",library,".singlet.filtered.rds",sep=""))
 ```
