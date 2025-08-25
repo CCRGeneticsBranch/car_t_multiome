@@ -16,7 +16,7 @@ params:
   output_dir: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/preprocessing"
   nFeature_RNA_min: 500
   nFeature_RNA_max: 6000
-  percent.mt_max: 10
+  percent_mt_max: 10
 ---
 
 Preprocess Illumina 10X Genomics GEX / antibody capture data by sample - from Cell Ranger per-sample filtered matrix
@@ -129,11 +129,11 @@ hist(seurat_obj$percent.mt)
 
 # Filter
 print(paste("Number of genes:",params$nFeature_RNA_min,"-",params$nFeature_RNA_max))
-print(paste("% MT:",params$percent.mt_max))
+print(paste("% MT:",params$percent_mt_max))
 
 seurat_obj.filtered <- subset(seurat_obj, subset = nFeature_RNA > params$nFeature_RNA_min & 
                                         nFeature_RNA < params$nFeature_RNA_max & 
-                                        percent.mt < params$percent.mt_max)
+                                        percent.mt < params$percent_mt_max)
 
 print(paste("Cells post-filtering:",length(colnames(seurat_obj.filtered))))
 VlnPlot(seurat_obj.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
@@ -142,6 +142,5 @@ VlnPlot(seurat_obj.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent
 # Save object
 
 ```{r}
-saveRDS(seurat_obj, file = paste(output_dir,"/",sample,".rds",sep=""))
-saveRDS(seurat_obj.filtered, file = paste(output_dir,"/",sample,".filtered.rds",sep=""))
+saveRDS(seurat_obj.filtered, file = paste(output_dir,"/by_sample/",library,".",sample,".rds",sep=""))
 ```

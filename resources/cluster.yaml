@@ -20,3 +20,6 @@ cellranger:
 
 preprocess_library:
     mem: 16g
+
+preprocess_sample:
+    mem: 16g

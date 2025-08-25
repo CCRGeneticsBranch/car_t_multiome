@@ -16,7 +16,7 @@ params:
   hashtags: "HTO1,HTO2,HTO3,HTO4"
   nFeature_RNA_min: 500
   nFeature_RNA_max: 6000
-  percent.mt_max: 10
+  percent_mt_max: 10
 ---
 
 Preprocess Illumina 10X Genomics GEX / antibody capture / HTO data by library - from Cell Ranger raw matrix
@@ -175,10 +175,10 @@ hist(seurat_obj.singlet$nFeature_RNA)
 hist(seurat_obj.singlet$percent.mt)
 
 print(paste("Number of genes:",params$nFeature_RNA_min,"-",params$nFeature_RNA_max))
-print(paste("% MT:",params$percent.mt_max))
+print(paste("% MT:",params$percent_mt_max))
 seurat_obj.singlet.filtered <- subset(seurat_obj.singlet, subset = nFeature_RNA > params$nFeature_RNA_min & 
                                         nFeature_RNA < params$nFeature_RNA_max & 
-                                        percent.mt < params$percent.mt_max)
+                                        percent.mt < params$percent_mt_max)
 table(seurat_obj.singlet.filtered$MULTI_ID)
 VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
 ```
@@ -186,6 +186,5 @@ VlnPlot(seurat_obj.singlet.filtered, features = c("nFeature_RNA", "nCount_RNA", 
 # Save object
 
 ```{r}
-saveRDS(seurat_obj.singlet, file = paste(output_dir,"/",library,".singlet.rds",sep=""))
-saveRDS(seurat_obj.singlet.filtered, file = paste(output_dir,"/",library,".singlet.filtered.rds",sep=""))
+saveRDS(seurat_obj.singlet.filtered, file = paste(output_dir,"/by_library/",library,".rds",sep=""))
 ```

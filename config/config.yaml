@@ -12,18 +12,21 @@ cluster:
     PIPELINE_HOME/resources/cluster.yaml
 
 rawdir:
-    /data/khanlab/projects/DATA/
-
-run_cellranger: True
+    /data/khanlab/projects/DATA
+gex_ref:
+    /data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/custom_reference/GRCh38_BiCisCar_LTR/
+vdj_ref:
+    /fdb/cellranger/refdata-cellranger-vdj-GRCh38-alts-ensembl-7.1.0/
+feature_ref:
+    /data/khanlab/projects/DATA/SingleCell/ZhongmeiCART070925/feature_ref_zhongmeiCART070925.csv
 
 # Custom references
 custom_genome: GRCh38_BiCisCar
 
-GRCh38_BiCisCar:
-GRCh38_FGFR4:
-GRCh38_BiCisCar_LTR:
+# Force cells
+force_cells: 20000
 
 # QC thresholds
 nFeature_RNA_min: 500
 nFeature_RNA_max: 6000
-percent.mt_max: 10
+percent_mt_max: 10
