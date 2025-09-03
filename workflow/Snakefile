@@ -14,7 +14,11 @@ RAWDIR = config["rawdir"]
 # Get list of samples/libraries
 manifest = pd.read_table(config["manifest"])
 LIBRARIES =  manifest['Library'].unique()
-LIBRARY_TO_FCID = dict(zip(manifest['Library'], manifest['FCID']))
+LIBRARY_TO_FCIDS = manifest.groupby('Library')['FCID'].unique().to_dict()
+print(LIBRARY_TO_FCIDS)
+# Helper to flatten all (library, fcid) pairs
+LIBRARY_FCID_PAIRS = [(lib, fcid) for lib in LIBRARIES for fcid in LIBRARY_TO_FCIDS[lib]]
+print(LIBRARY_FCID_PAIRS)
 HASHTAGS_PER_LIBRARY = manifest.groupby('Library')['Hashtag'].apply(lambda x: ",".join(sorted(x.dropna().unique()))).to_dict()
 
 # Define tools
@@ -34,11 +38,13 @@ localrules: link_fastq, make_multi_csv, copy_summary
 
 rule all:
     input:
-        # Link fastq
-        expand(join(RESULTSDIR, "raw", "{library}_{mode}_S1_L001_{read}_001.fastq.gz"),
-               library=LIBRARIES,
-               mode=["5GEX", "BC", "TCR"],
-               read=["R1", "R2", "I1", "I2"]),
+        # Link fastq: only valid (library, fcid) pairs, and all mode/read for each
+        [
+            join(RESULTSDIR, "raw", f"{lib}_{mode}_{fcid}_S1_L001_{read}_001.fastq.gz")
+            for lib, fcid in LIBRARY_FCID_PAIRS
+            for mode in ["5GEX", "BC", "TCR"]
+            for read in ["R1", "R2", "I1", "I2"]
+        ],
 
         # cellranger multi config CSV files
         expand(join(RESULTSDIR, "cellranger", "multi_{library}.csv"), library=LIBRARIES),
@@ -57,40 +63,17 @@ rule all:
 
 rule link_fastq:
     """Link and rename fastq files to bcl2fastq format"""
-    input:
     output:
-        fastq = join(RESULTSDIR, "raw", "{library}_{mode}_S1_L001_{read}_001.fastq.gz")
+        fastq = join(RESULTSDIR, "raw", "{library}_{mode}_{fcid}_S1_L001_{read}_001.fastq.gz")
     params:
         library = "{library}",
         mode = "{mode}",
-        read = "{read}",
-        fcid = lambda wc: "%s" % LIBRARY_TO_FCID[wc.library]
+        fcid = "{fcid}",
+        read = "{read}"
     shell:
         """
-        ln -s {RAWDIR}/Sample_{params.library}_{params.mode}_Tsc_{params.fcid}/Sample_{params.library}_{params.mode}_Tsc_{params.fcid}_{params.read}.fastq.gz \
-              {RESULTSDIR}/raw/{params.library}_{params.mode}_S1_L001_{params.read}_001.fastq.gz
-        """
-
-rule mkref:
-    """Run cellranger mkref to add construct to reference genome"""
-    input:
-        fasta = join(RESULTSDIR,"custom_reference","genome.fa"),
-        gtf = join(RESULTSDIR,"custom_reference","genes.gtf")   
-    output:
-        ref = join(RESULTSDIR,"custom_reference",config['custom_genome'])
-    envmodules:
-        TOOLS["cellranger"]
-    shell:
-        """
-        TEMP=/lscratch/$SLURM_JOB_ID
-
-        cellranger mkref --genome={output.ref} \
-            --fasta={input.fasta} \
-            --genes={input.gtf} \
-            --memgb=48 --nthreads=12 \
-            --localcores=$SLURM_CPUS_PER_TASK \
-            --localmem=92 \
-            --jobmode=slurm --maxjobs=20
+        ln -s {RAWDIR}/Sample_{params.library}_{params.mode}_{params.fcid}/Sample_{params.library}_{params.mode}_{params.fcid}_{params.read}.fastq.gz \
+              {RESULTSDIR}/raw/{params.library}_{params.mode}_{params.fcid}_S1_L001_{params.read}_001.fastq.gz
         """
 
 rule make_multi_csv:
@@ -103,10 +86,16 @@ rule make_multi_csv:
         library = "{library}"
     run:
         # Prepare reference section
-        reference_lines = [
+        reference_lines_gex = [
             "[gene-expression]",
             f"reference,{config['gex_ref']}",
             "create-bam,true",
+        ]
+
+        if(config["force"]):
+            reference_lines_gex.append(f"force-cells,{config['force_cells']}")
+
+        reference_lines = [
             "",
             "[vdj]",
             f"reference,{config['vdj_ref']}",
@@ -119,14 +108,18 @@ rule make_multi_csv:
         libraries_lines = [
             "",
             "[libraries]",
-            "fastq_id,fastqs,feature_types",
-            f"{params.library}_5GEX,{RESULTSDIR}/raw,Gene Expression",
-            f"{params.library}_TCR,{RESULTSDIR}/raw,VDJ",
-            f"{params.library}_BC,{RESULTSDIR}/raw,Antibody Capture"
+            "fastq_id,fastqs,feature_types"
         ]
+        for mode, feature_type in [("5GEX", "Gene Expression"), ("TCR", "VDJ"), ("BC", "Antibody Capture")]:
+            for fcid in LIBRARY_TO_FCIDS[params.library]:
+                fastq_id = f"{params.library}_{mode}_{fcid}"
+                fastqs = RESULTSDIR + "/raw"
+                libraries_lines.append(f"{fastq_id},{fastqs},{feature_type}")
 
         # Prepare samples section
         sub = manifest[manifest["Library"] == f"{params.library}"]
+        sub = sub.drop_duplicates(subset=["Sample", "Hashtag"])
+
         print(sub)
 
         samples_lines = [
@@ -139,7 +132,7 @@ rule make_multi_csv:
 
         # Write to CSV
         with open(output.multi_csv, "w") as f:
-            f.write("\n".join(reference_lines + libraries_lines + samples_lines) + "\n")
+            f.write("\n".join(reference_lines_gex + reference_lines + libraries_lines + samples_lines) + "\n")
 
 rule cellranger:
     """Run Cell Ranger multi for each library"""

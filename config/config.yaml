@@ -24,6 +24,7 @@ feature_ref:
 custom_genome: GRCh38_BiCisCar
 
 # Force cells
+force: false
 force_cells: 20000
 
 # QC thresholds
