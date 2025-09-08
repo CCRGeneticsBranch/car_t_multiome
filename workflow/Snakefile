@@ -110,7 +110,7 @@ rule make_multi_csv:
             "[libraries]",
             "fastq_id,fastqs,feature_types"
         ]
-        for mode, feature_type in [("5GEX", "Gene Expression"), ("TCR", "VDJ"), ("BC", "Antibody Capture")]:
+        for mode, feature_type in [("5GEX", "Gene Expression"), ("TCR", "VDJ-T"), ("BC", "Antibody Capture")]:
             for fcid in LIBRARY_TO_FCIDS[params.library]:
                 fastq_id = f"{params.library}_{mode}_{fcid}"
                 fastqs = RESULTSDIR + "/raw"
