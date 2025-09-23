@@ -16,10 +16,10 @@ mkref:
 cellranger:
     mem: 35g
     threads: 12
-    time: 00-04:00:00
+    time: 00-08:00:00
 
 preprocess_library:
-    mem: 16g
+    mem: 32g
 
 preprocess_sample:
     mem: 16g
