@@ -86,6 +86,18 @@ seurat_obj <- NormalizeData(seurat_obj)
 seurat_obj <- NormalizeData(seurat_obj, assay = "ADT", normalization.method = "CLR", margin = 2)
 ```
 
+Plot ADT raw counts and CLR-normalized data
+
+```{r}
+test = melt(as.matrix(seurat_obj[["ADT"]]$counts))
+colnames(test) = c("Antibody","cell", "count")
+ggplot(test,aes(x=log10(count+0.001),y=Antibody)) + geom_density_ridges()
+
+test = melt(as.matrix(seurat_obj[["ADT"]]$data))
+colnames(test) = c("Antibody","cell", "CLR2")
+ggplot(test,aes(x=CLR2,y=Antibody)) + geom_density_ridges()
+```
+
 # ADT normalization with DSB
 
 Removes ambient noise using empty droplets and uses non-specific isotype controls to remove inter-cell technical variation.
@@ -115,6 +127,12 @@ seurat_obj[["ADT"]]$data = DSBNormalizeProtein(cell_protein_matrix = seurat_obj[
                                      use.isotype.control = TRUE, 
                                      isotype.control.name.vec = isotypes,
                                      fast.km = TRUE)
+```
+
+```{r}
+test = melt(as.matrix(seurat_obj[["ADT"]]$data))
+colnames(test) = c("Antibody","cell", "ADT")
+ggplot(test,aes(x=ADT,y=Antibody)) + geom_density_ridges()
 ```
 
 # GEX QC and filtering
