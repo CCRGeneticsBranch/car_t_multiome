@@ -11,6 +11,17 @@ RESULTSDIR = join(WORKDIR,"results")
 SCRIPTSDIR = config["scriptsdir"]
 RAWDIR = config["rawdir"]
 
+# Pipeline version (bump VERSION file on each release)
+PIPELINE_HOME = os.path.dirname(os.path.dirname(os.path.abspath(workflow.snakefile)))
+with open(join(PIPELINE_HOME, "VERSION")) as f:
+    PIPELINE_VERSION = f.read().strip()
+print(f"Pipeline version: {PIPELINE_VERSION}")
+
+onstart:
+    os.makedirs(RESULTSDIR, exist_ok=True)
+    with open(join(RESULTSDIR, "pipeline_version.txt"), "w") as f:
+        f.write(f"{PIPELINE_VERSION}\n")
+
 # Get list of samples/libraries
 manifest = pd.read_table(config["manifest"])
 LIBRARIES =  manifest['Library'].unique()
@@ -20,6 +31,10 @@ print(LIBRARY_TO_FCIDS)
 LIBRARY_FCID_PAIRS = [(lib, fcid) for lib in LIBRARIES for fcid in LIBRARY_TO_FCIDS[lib]]
 print(LIBRARY_FCID_PAIRS)
 HASHTAGS_PER_LIBRARY = manifest.groupby('Library')['Hashtag'].apply(lambda x: ",".join(sorted(x.dropna().unique()))).to_dict()
+
+# Whether the library includes TCR fastqs or is CITEseq-only (5GEX/BC)
+HAS_TCR = config["has_tcr"]
+MODES = ["5GEX", "BC"] + (["TCR"] if HAS_TCR else [])
 
 # Define tools
 with open(config["tools"]) as f:
@@ -42,8 +57,8 @@ rule all:
         [
             join(RESULTSDIR, "raw", f"{lib}_{mode}_{fcid}_S1_L001_{read}_001.fastq.gz")
             for lib, fcid in LIBRARY_FCID_PAIRS
-            for mode in ["5GEX", "BC", "TCR"]
-            for read in ["R1", "R2", "I1", "I2"]
+            for mode in MODES
+            for read in ["R1", "R2"]
         ],
 
         # cellranger multi config CSV files
@@ -95,10 +110,14 @@ rule make_multi_csv:
         if(config["force"]):
             reference_lines_gex.append(f"force-cells,{config['force_cells']}")
 
-        reference_lines = [
-            "",
-            "[vdj]",
-            f"reference,{config['vdj_ref']}",
+        reference_lines = []
+        if HAS_TCR:
+            reference_lines += [
+                "",
+                "[vdj]",
+                f"reference,{config['vdj_ref']}",
+            ]
+        reference_lines += [
             "",
             "[feature]",
             f"reference,{config['feature_ref']}"
@@ -110,7 +129,10 @@ rule make_multi_csv:
             "[libraries]",
             "fastq_id,fastqs,feature_types"
         ]
-        for mode, feature_type in [("5GEX", "Gene Expression"), ("TCR", "VDJ-T"), ("BC", "Antibody Capture")]:
+        mode_feature_types = [("5GEX", "Gene Expression"), ("BC", "Antibody Capture")]
+        if HAS_TCR:
+            mode_feature_types.append(("TCR", "VDJ-T"))
+        for mode, feature_type in mode_feature_types:
             for fcid in LIBRARY_TO_FCIDS[params.library]:
                 fastq_id = f"{params.library}_{mode}_{fcid}"
                 fastqs = RESULTSDIR + "/raw"

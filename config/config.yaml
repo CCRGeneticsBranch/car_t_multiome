@@ -23,6 +23,9 @@ feature_ref:
 # Custom references
 custom_genome: GRCh38_BiCisCar
 
+# Set to false for CITEseq-only runs (5GEX/BC, no TCR)
+has_tcr: true
+
 # Force cells
 force: false
 force_cells: 20000
