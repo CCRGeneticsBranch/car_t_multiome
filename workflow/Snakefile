@@ -8,11 +8,11 @@ import pandas as pd
 # Set directories
 WORKDIR = config["workdir"]
 RESULTSDIR = join(WORKDIR,"results")
-SCRIPTSDIR = config["scriptsdir"]
+SCRIPTSDIR = join(workflow.basedir, "scripts")
 RAWDIR = config["rawdir"]
 
 # Pipeline version (bump VERSION file on each release)
-PIPELINE_HOME = os.path.dirname(os.path.dirname(os.path.abspath(workflow.snakefile)))
+PIPELINE_HOME = os.path.dirname(workflow.basedir)
 with open(join(PIPELINE_HOME, "VERSION")) as f:
     PIPELINE_VERSION = f.read().strip()
 print(f"Pipeline version: {PIPELINE_VERSION}")

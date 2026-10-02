@@ -13,13 +13,13 @@ Steps include:
 
 To run the pipeline, clone the repo from github. In an interactive session, initialize the analysis directory with:
 ```
-  bash [path to repo]/car_t_multiome/run_citeseq --runmode=init --workdir=[directory]
+  bash [path to repo]/car_t_multiome/run_car_t_multiome --runmode=init --workdir=[directory]
 ```
 Edit the config/samples.tsv and config/config.yaml files as needed. Perform a dryrun with:
 ```
-  bash [path to repo]/car_t_multiome/run_citeseq --runmode=dryrun --workdir=[directory]
+  bash [path to repo]/car_t_multiome/run_car_t_multiome --runmode=dryrun --workdir=[directory]
 ```
 If successful, launch the pipeline with:
 ```
-  bash [path to repo]/car_t_multiome/run_citeseq --runmode=run --workdir=[directory]
+  bash [path to repo]/car_t_multiome/run_car_t_multiome --runmode=run --workdir=[directory]
 ```
