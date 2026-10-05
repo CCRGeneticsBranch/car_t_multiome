@@ -10,10 +10,10 @@ output:
 editor_options:
   chunk_output_type: console
 params:
-  library: "GPC2_CD276_BisCAR_CTRL"
-  sample: "CTRL_TIL_rep1"
-  input_dir: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/cellranger"
-  output_dir: "/data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/preprocessing"
+  library: "library1"
+  sample: "sample1"
+  input_dir: "/path/to/results/cellranger"
+  output_dir: "/path/to/results/preprocessing"
   nFeature_RNA_min: 500
   nFeature_RNA_max: 6000
   percent_mt_max: 10

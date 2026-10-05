@@ -9,17 +9,18 @@ tools:
 cluster:
     WORKDIR/config/cluster.yaml
 
+# Folder containing Sample_<library>_<mode>_<FCID> FASTQ folders
 rawdir:
     /data/khanlab/projects/DATA
+# Cell Ranger GEX reference (standard or custom)
 gex_ref:
-    /data/khanlab3/gb_omics/projects/khan/ccrgb_95/analysis/BiCisCar/custom_reference/GRCh38_BiCisCar_LTR/
+    /path/to/custom/reference/
+# Cell Ranger VDJ reference
 vdj_ref:
     /fdb/cellranger/refdata-cellranger-vdj-GRCh38-alts-ensembl-7.1.0/
+# Cell Ranger feature reference (antibody/hashtag barcodes)
 feature_ref:
-    /data/khanlab/projects/DATA/SingleCell/ZhongmeiCART070925/feature_ref_zhongmeiCART070925.csv
-
-# Custom references
-custom_genome: GRCh38_BiCisCar
+    /path/to/feature_ref.csv
 
 # Set to false for CITEseq-only runs (5GEX/BC, no TCR)
 has_tcr: true

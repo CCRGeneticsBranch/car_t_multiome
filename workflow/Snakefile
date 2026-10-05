@@ -215,6 +215,8 @@ rule preprocess_library:
         """
         Rscript -e 'rmarkdown::render("{params.script}",
                              output_file = "{params.outdir}/by_library/{params.library}.html",
+                             intermediates_dir = tempdir(),
+                             knit_root_dir = "{params.outdir}",
                              params = list(
                                 library = "{params.library}",
                                 input_dir = "{params.indir}",
@@ -247,6 +249,8 @@ rule preprocess_sample:
         """
         Rscript -e 'rmarkdown::render("{params.script}",
                              output_file = "{params.outdir}/by_sample/{params.library}.{params.sample}.html",
+                             intermediates_dir = tempdir(),
+                             knit_root_dir = "{params.outdir}",
                              params = list(
                                 library = "{params.library}",
                                 sample = "{params.sample}",
