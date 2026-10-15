@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Launcher for the CAR-T multiome (CITE-seq) pipeline; shared logic is in bin/launcher.sh (copied from biowulf-snakemake-launcher).
+# Launcher for the single-cell multiome (CITE-seq) pipeline; shared logic is in bin/launcher.sh (copied from biowulf-snakemake-launcher).
 # shellcheck disable=SC2034  # variables below are read by launcher.sh
 
 PIPELINE_NAME="car_t_multiome"
-PIPELINE_DESCRIPTION="run the CAR-T multiome pipeline (5' GEX, CITE-seq, HTO, VDJ)"
+PIPELINE_DESCRIPTION="run the single-cell multiome pipeline (5' GEX, CITE-seq, HTO, VDJ)"
 SBATCH_JOB_NAME="CITEseq"
 
 PIPELINE_HOME="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
