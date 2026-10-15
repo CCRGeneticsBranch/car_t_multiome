@@ -127,6 +127,10 @@ Modules are listed in [resources/tools.yaml](resources/tools.yaml).
 | dsb | `R` | `preprocess_*` | Mulè et al. 2022, *Nat Commun* [doi:10.1038/s41467-022-29356-8](https://doi.org/10.1038/s41467-022-29356-8) |
 | CITE-seq / cell hashing | — | — | Stoeckius et al. 2017, *Nat Methods* [doi:10.1038/nmeth.4380](https://doi.org/10.1038/nmeth.4380); Stoeckius et al. 2018, *Genome Biol* [doi:10.1186/s13059-018-1603-1](https://doi.org/10.1186/s13059-018-1603-1) |
 
+## License
+
+Original pipeline code and documentation are licensed under MIT; see [LICENSE](LICENSE). Third-party software and data resources retain their own terms. The MIT license does not grant redistribution rights for external or bundled third-party resources.
+
 ## Versioning
 
 The pipeline version is in [VERSION](VERSION) and changes are listed in [CHANGELOG.md](CHANGELOG.md). Each run records the pipeline version, git commit and launcher version in `runinfo.yaml` and `results/pipeline_version.txt`. The launch script is a copy of [biowulf-snakemake-launcher](https://github.com/CCRGeneticsBranch/biowulf-snakemake-launcher) (`bin/launcher.sh`).
